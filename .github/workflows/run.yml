@@ -1,0 +1,32 @@
+name: Run BYNIGHTS every day
+
+on:
+  schedule:
+    - cron: '0 10 * * *'  # ogni giorno alle 10:00 UTC (11:00 in Italia in inverno)
+  workflow_dispatch:
+
+jobs:
+  run-bynights:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Playwright and dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install chromium
+
+      - name: Run BYNIGHTS script
+        env:
+          INSTAGRAM_USERNAME: ${{ secrets.INSTAGRAM_USERNAME }}
+Add scheduled workflow
+          INSTAGRAM_PASSWORD: ${{ secrets.INSTAGRAM_PASSWORD }}
+        run: |
+          python main.py
