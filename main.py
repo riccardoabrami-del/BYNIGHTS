@@ -1,59 +1,56 @@
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
 import os
-from dotenv import load_dotenv
+import json
 import time
+from dotenv import load_dotenv
 
 load_dotenv()
 
-URL = "https://www.instagram.com/"
 SUGGERITI_URL = "https://www.instagram.com/explore/people/"
-USERNAME = os.getenv("INSTAGRAM_USERNAME")
-PASSWORD = os.getenv("INSTAGRAM_PASSWORD")
+COOKIES_JSON = os.getenv("INSTAGRAM_COOKIES")  # Cookie di sessione in formato JSON
 MAX_FOLLOW = 20  # Numero massimo di account da seguire per sessione
 
 
-def login_instagram(page):
-    # Vai alla home / pagina di login
-    page.goto(URL, timeout=60000)
-
-    # Aspetta che compaiano i campi
-    page.wait_for_timeout(5000)
-
-    # Compila username
-    page.locator("input[name='username']").fill(USERNAME)
-
-    # Compila password
-    page.locator("input[name='password']").fill(PASSWORD)
-
-    # Clicca il bottone Log In
-    page.locator("button[type='submit']").click()
-
-    # Aspetta che il login si completi
-    page.wait_for_timeout(10000)
-    print("Login completato.")
+def carica_cookies(context):
+    """Carica i cookie di sessione Instagram nel browser."""
+    if not COOKIES_JSON:
+        print("Errore: INSTAGRAM_COOKIES non trovato nei secrets.")
+        return False
+    try:
+        cookies = json.loads(COOKIES_JSON)
+        context.add_cookies(cookies)
+        print(f"Cookie caricati con successo ({len(cookies)} cookie).")
+        return True
+    except Exception as e:
+        print(f"Errore nel caricamento dei cookie: {e}")
+        return False
 
 
 def segui_account_suggeriti(page):
+    """Naviga sulla pagina dei suggeriti e segue gli account."""
     print("Navigo sulla pagina degli account suggeriti...")
     page.goto(SUGGERITI_URL, timeout=60000)
     page.wait_for_timeout(5000)
 
+    # Verifica che il login sia andato a buon fine
+    if "accounts/login" in page.url:
+        print("Errore: non loggato. I cookie potrebbero essere scaduti.")
+        return
+
+    print("Login confermato tramite cookie. Inizio follow...")
     seguiti = 0
 
     for i in range(MAX_FOLLOW):
         try:
-            # Cerca tutti i bottoni 'Segui' visibili sulla pagina
+            # Cerca bottoni 'Segui' (italiano) o 'Follow' (inglese)
             bottoni = page.locator("button", has_text="Segui").all()
-
             if not bottoni:
-                # Prova anche in inglese nel caso la lingua sia diversa
                 bottoni = page.locator("button", has_text="Follow").all()
 
             if not bottoni:
                 print("Nessun bottone Segui trovato. Uscita.")
                 break
 
-            # Clicca il primo bottone disponibile
             bottone = bottoni[0]
             bottone.scroll_into_view_if_needed()
             bottone.click()
@@ -63,35 +60,43 @@ def segui_account_suggeriti(page):
             # Pausa tra un follow e l'altro per evitare blocchi
             time.sleep(3)
 
-            # Ricarica la lista ogni 5 follow per avere nuovi suggerimenti
+            # Ricarica ogni 5 follow per avere nuovi suggerimenti
             if seguiti % 5 == 0:
                 page.reload()
                 page.wait_for_timeout(4000)
 
         except Exception as e:
-            print(f"Errore durante il follow: {e}")
+            print(f"Errore durante il follow {seguiti + 1}: {e}")
             break
 
-    print(f"Operazione completata. Account seguiti: {seguiti}")
+    print(f"Operazione completata. Account seguiti oggi: {seguiti}")
 
 
 def main():
-    if not USERNAME or not PASSWORD:
-        print("Errore: credenziali non trovate (INSTAGRAM_USERNAME / INSTAGRAM_PASSWORD).")
+    if not COOKIES_JSON:
+        print("Errore: INSTAGRAM_COOKIES non trovato. Aggiungi il secret su GitHub.")
         return
 
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
 
-            login_instagram(page)
+            # Carica i cookie di sessione
+            ok = carica_cookies(context)
+            if not ok:
+                browser.close()
+                return
+
+            page = context.new_page()
             segui_account_suggeriti(page)
 
             browser.close()
 
     except PWTimeoutError:
-        print("Timeout durante il login a Instagram.")
+        print("Timeout durante la navigazione.")
     except Exception as e:
         print(f"Errore imprevisto: {e}")
 
