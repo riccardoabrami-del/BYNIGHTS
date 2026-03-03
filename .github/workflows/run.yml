@@ -26,7 +26,6 @@ jobs:
       - name: Run BYNIGHTS script
         env:
           INSTAGRAM_USERNAME: ${{ secrets.INSTAGRAM_USERNAME }}
-Add scheduled workflow
           INSTAGRAM_PASSWORD: ${{ secrets.INSTAGRAM_PASSWORD }}
         run: |
           python main.py
