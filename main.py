@@ -53,7 +53,7 @@ def segui_account_suggeriti(page):
 
             bottone = bottoni[0]
             bottone.scroll_into_view_if_needed()
-            bottone.click()
+            bottone.click(timeout=5000)
             seguiti += 1
             print(f"Seguito account {seguiti}/{MAX_FOLLOW}")
 
@@ -67,7 +67,7 @@ def segui_account_suggeriti(page):
 
         except Exception as e:
             print(f"Errore durante il follow {seguiti + 1}: {e}")
-            break
+            continue
 
     print(f"Operazione completata. Account seguiti oggi: {seguiti}")
 
