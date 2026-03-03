@@ -8,7 +8,7 @@ load_dotenv()
 
 SUGGERITI_URL = "https://www.instagram.com/explore/people/"
 COOKIES_JSON = os.getenv("INSTAGRAM_COOKIES")  # Cookie di sessione in formato JSON
-MAX_FOLLOW = 20  # Numero massimo di account da seguire per sessione
+MAX_FOLLOW = 70  # Numero massimo di account da seguire per sessione
 
 
 def carica_cookies(context):
