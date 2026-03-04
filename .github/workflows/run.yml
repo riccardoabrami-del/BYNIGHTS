@@ -2,7 +2,7 @@ name: Run BYNIGHTS every day
 
 on:
   schedule:
-    - cron: '0 10 * * *'  # ogni giorno alle 10:00 UTC (11:00 in Italia in inverno) # aggiornato 2026-03-04
+        - cron: "30 9 * * *"  # 09:30 UTC = 10:30 CET (stesso orario di notizie - garantito)
   workflow_dispatch:
 
 jobs:
