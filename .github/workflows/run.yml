@@ -3,7 +3,10 @@ name: Run BYNIGHTS every day
 on:
   schedule:
         - cron: "30 9 * * *"  # 09:30 UTC = 10:30 CET (stesso orario di notizie - garantito)
-  workflow_dispatch:
+  workflow_dispatch:# on:
+# schedule:
+#   - cron: "30 9 * * *" # Runs at 09:30 UTC + 10:30 CET (stesso orario di notizie - garantito)
+# workflow_dispatch:
 
 jobs:
   run-bynights:
