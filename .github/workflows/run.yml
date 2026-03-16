@@ -2,7 +2,7 @@ name: Run BYNIGHTS every day
 
 on:
   schedule:
-        - cron: "30 9 * * *"  # 09:30 UTC = 10:30 CET (stesso orario di notizie - garantito)
+    - cron: "30 9 * * *"
   workflow_dispatch:
 
 jobs:
@@ -27,4 +27,6 @@ jobs:
         env:
           INSTAGRAM_COOKIES: ${{ secrets.INSTAGRAM_COOKIES }}
         run: |
+          pwd
+          ls -R
           python main.py
