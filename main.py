@@ -1,54 +1,9 @@
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
-import os
-import json
-import time
-from dotenv import load_dotenv
-
-load_dotenv()
-
-SUGGERITI_URL = "https://www.instagram.com/explore/people/"
-COOKIES_JSON = os.getenv("INSTAGRAM_COOKIES")  # Cookie di sessione in formato JSON
-MAX_FOLLOW = 70  # Numero massimo di account da seguire per sessione
-SOGLIA_MUTUAL = 7  # minimo "altri X" per seguire
-
-
-def carica_cookies(context):
-    """Carica i cookie di sessione Instagram nel browser."""
-    if not COOKIES_JSON:
-        print("Errore: INSTAGRAM_COOKIES non trovato nei secrets.")
-        return False
-    try:
-        cookies = json.loads(COOKIES_JSON)
-        context.add_cookies(cookies)
-        print(f"Cookie caricati con successo ({len(cookies)} cookie).")
-        return True
-    except Exception as e:
-        print(f"Errore nel caricamento dei cookie: {e}")
-        return False
-
-
-def chiudi_popup(page):
-    """Chiude eventuali popup o dialoghi aperti su Instagram."""
-    try:
-        page.keyboard.press("Escape")
-        time.sleep(0.5)
-        for testo in ["Non ora", "Not Now", "Chiudi", "Close", "Cancel"]:
-            btn = page.locator(f"button:has-text('{testo}')").first
-            if btn.is_visible():
-                btn.click(timeout=3000)
-                time.sleep(0.5)
-                break
-    except Exception:
-        pass
-
-
 def segui_account_suggeriti(page):
     """Naviga sulla pagina dei suggeriti e segue gli account con abbastanza follower in comune."""
     print("Navigo sulla pagina degli account suggeriti...")
     page.goto(SUGGERITI_URL, timeout=60000)
     page.wait_for_timeout(5000)
 
-    # Verifica che il login sia andato a buon fine
     if "accounts/login" in page.url:
         print("Errore: non loggato. I cookie potrebbero essere scaduti.")
         return
@@ -56,18 +11,18 @@ def segui_account_suggeriti(page):
     print("Login confermato tramite cookie. Inizio follow con soglia mutual =", SOGLIA_MUTUAL)
     seguiti = 0
     tentativi_falliti = 0
-    max_tentativi_falliti = 10  # Dopo 10 errori consecutivi ricarica la pagina
+    max_tentativi_falliti = 10
 
     while seguiti < MAX_FOLLOW:
         try:
             chiudi_popup(page)
 
-            # prendi le "card" utente che hanno un bottone Segui
-            cards = page.locator("div:has(button:has(div:has-text('Segui')))").all()
-            print("Card trovate:", len(cards))
+            # trova tutti gli span che contengono "Follower:"
+            span_list = page.locator("span:has-text('Follower:')").all()
+            print("Span Follower trovati:", len(span_list))
 
-            if not cards:
-                print("Nessuna card trovata. Ricarico la pagina...")
+            if not span_list:
+                print("Nessuno span Follower trovato. Ricarico la pagina...")
                 page.goto(SUGGERITI_URL, timeout=60000)
                 page.wait_for_timeout(4000)
                 tentativi_falliti += 1
@@ -78,10 +33,8 @@ def segui_account_suggeriti(page):
 
             cliccato = False
 
-            for card in cards:
+            for span in span_list:
                 try:
-                    # trova lo span tipo "Follower: _nome_ + altri X"
-                    span = card.locator("span:has-text('Follower:')").first
                     if not span.is_visible():
                         continue
 
@@ -95,8 +48,10 @@ def segui_account_suggeriti(page):
                     print("Follower in comune trovati:", num)
 
                     if num < SOGLIA_MUTUAL:
-                        continue  # troppo pochi, salta
+                        continue
 
+                    # risali al contenitore (card) e al bottone Segui
+                    card = span.locator("xpath=ancestor::div[1]")
                     bottone = card.locator("button:has(div:has-text('Segui'))").first
                     if not bottone.is_visible():
                         continue
@@ -117,10 +72,10 @@ def segui_account_suggeriti(page):
                         page.reload()
                         page.wait_for_timeout(4000)
 
-                    break  # torna al while per aggiornare la lista
+                    break  # torna al while per aggiornare
 
                 except Exception as e:
-                    print(f"Errore su card: {e}")
+                    print(f"Errore su span/card: {e}")
                     chiudi_popup(page)
                     continue
 
@@ -141,35 +96,3 @@ def segui_account_suggeriti(page):
             continue
 
     print(f"Operazione completata. Account seguiti oggi: {seguiti}")
-
-
-def main():
-    if not COOKIES_JSON:
-        print("Errore: INSTAGRAM_COOKIES non trovato. Aggiungi il secret su GitHub.")
-        return
-    try:
-        with sync_playwright() as p:
-            # per debug puoi mettere headless=False e slow_mo=500
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                )
-            )
-            ok = carica_cookies(context)
-            if not ok:
-                browser.close()
-                return
-            page = context.new_page()
-            segui_account_suggeriti(page)
-            browser.close()
-    except PWTimeoutError:
-        print("Timeout durante la navigazione.")
-    except Exception as e:
-        print(f"Errore imprevisto: {e}")
-
-
-if __name__ == "__main__":
-    main()
