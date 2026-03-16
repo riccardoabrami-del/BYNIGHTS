@@ -1,12 +1,75 @@
-print("BYNIGHTS main.py caricato")
-...
-def main():
-    print("BYNIGHTS main() avviato")
-    ...
+from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
+import os
+import json
+import time
+from dotenv import load_dotenv
+
+print("DEBUG: main.py caricato")
+
+load_dotenv()
+
+SUGGERITI_URL = "https://www.instagram.com/explore/people/"
+COOKIES_JSON = os.getenv("INSTAGRAM_COOKIES")  # Cookie di sessione in formato JSON
+MAX_FOLLOW = 70  # Numero massimo di account da seguire per sessione
+
+
+def carica_cookies(context):
+    """Carica i cookie di sessione Instagram nel browser."""
+    print("DEBUG: carica_cookies() chiamata")
+    if not COOKIES_JSON:
+        print("Errore: INSTAGRAM_COOKIES non trovato nei secrets.")
+        return False
+    try:
+        cookies = json.loads(COOKIES_JSON)
+        context.add_cookies(cookies)
+        print(f"Cookie caricati con successo ({len(cookies)} cookie).")
+        return True
+    except Exception as e:
+        print(f"Errore nel caricamento dei cookie: {e}")
+        return False
+
+
+def chiudi_popup(page):
+    """Chiude eventuali popup o dialoghi aperti su Instagram."""
+    try:
+        page.keyboard.press("Escape")
+        time.sleep(0.5)
+        for testo in ["Non ora", "Not Now", "Chiudi", "Close", "Cancel"]:
+            btn = page.locator(f"button:has-text('{testo}')").first
+            if btn.is_visible():
+                btn.click(timeout=3000)
+                time.sleep(0.5)
+                break
+    except Exception:
+        pass
+
+
+def trova_bottoni_segui(page):
+    """Restituisce una lista di locator per i bottoni 'Segui' / 'Follow'."""
+    locator_seg = page.locator("button:has(div:has-text('Segui'))")
+    locator_follow = page.locator("button:has(div:has-text('Follow'))")
+
+    count_seg = locator_seg.count()
+    count_follow = locator_follow.count()
+    print(f"Bottoni Segui: {count_seg}, Bottoni Follow: {count_follow}")
+
+    if count_seg > 0:
+        return locator_seg.all()
+    if count_follow > 0:
+        return locator_follow.all()
+
+    fallback = page.locator("article button, div[role='button']")
+    count_fallback = fallback.count()
+    print(f"Bottoni fallback trovati: {count_fallback}")
+
+    if count_fallback > 0:
+        return fallback.all()
+
+    return []
 
 
 def segui_account_suggeriti(page):
-    """Naviga sulla pagina dei suggeriti e segue gli account con abbastanza follower in comune."""
+    """Naviga sulla pagina dei suggeriti e segue gli account."""
     print("Navigo sulla pagina degli account suggeriti...")
     page.goto(SUGGERITI_URL, timeout=60000)
     page.wait_for_timeout(5000)
@@ -15,7 +78,7 @@ def segui_account_suggeriti(page):
         print("Errore: non loggato. I cookie potrebbero essere scaduti.")
         return
 
-    print("Login confermato tramite cookie. Inizio follow con soglia mutual =", SOGLIA_MUTUAL)
+    print("Login confermato tramite cookie. Inizio follow...")
     seguiti = 0
     tentativi_falliti = 0
     max_tentativi_falliti = 10
@@ -24,12 +87,10 @@ def segui_account_suggeriti(page):
         try:
             chiudi_popup(page)
 
-            # trova tutti gli span che contengono "Follower:"
-            span_list = page.locator("span:has-text('Follower:')").all()
-            print("Span Follower trovati:", len(span_list))
+            bottoni = trova_bottoni_segui(page)
 
-            if not span_list:
-                print("Nessuno span Follower trovato. Ricarico la pagina...")
+            if not bottoni:
+                print("Nessun bottone Segui trovato. Ricarico la pagina...")
                 page.goto(SUGGERITI_URL, timeout=60000)
                 page.wait_for_timeout(4000)
                 tentativi_falliti += 1
@@ -39,30 +100,8 @@ def segui_account_suggeriti(page):
                 continue
 
             cliccato = False
-
-            for span in span_list:
+            for bottone in bottoni:
                 try:
-                    if not span.is_visible():
-                        continue
-
-                    testo = span.inner_text()
-                    # es: "Follower: _matteomacchi___ + altri 8"
-                    if "altri" not in testo:
-                        continue
-
-                    num_str = testo.split("altri")[-1].strip()
-                    num = int("".join(ch for ch in num_str if ch.isdigit()))
-                    print("Follower in comune trovati:", num)
-
-                    if num < SOGLIA_MUTUAL:
-                        continue
-
-                    # risali al contenitore (card) e al bottone Segui
-                    card = span.locator("xpath=ancestor::div[1]")
-                    bottone = card.locator("button:has(div:has-text('Segui'))").first
-                    if not bottone.is_visible():
-                        continue
-
                     chiudi_popup(page)
                     bottone.scroll_into_view_if_needed()
                     bottone.click(timeout=3000, force=True)
@@ -70,7 +109,7 @@ def segui_account_suggeriti(page):
 
                     seguiti += 1
                     tentativi_falliti = 0
-                    print(f"Seguito account {seguiti}/{MAX_FOLLOW} (mutual {num})")
+                    print(f"Seguito account {seguiti}/{MAX_FOLLOW}")
                     cliccato = True
 
                     time.sleep(2)
@@ -79,16 +118,16 @@ def segui_account_suggeriti(page):
                         page.reload()
                         page.wait_for_timeout(4000)
 
-                    break  # torna al while per aggiornare
+                    break
 
                 except Exception as e:
-                    print(f"Errore su span/card: {e}")
+                    print(f"Errore click bottone: {e}")
                     chiudi_popup(page)
                     continue
 
             if not cliccato:
                 tentativi_falliti += 1
-                print(f"Nessun account con >= {SOGLIA_MUTUAL} mutual cliccabile (tentativo {tentativi_falliti})")
+                print(f"Nessun bottone cliccabile trovato (tentativo {tentativi_falliti})")
                 page.keyboard.press("End")
                 time.sleep(2)
                 if tentativi_falliti >= max_tentativi_falliti:
@@ -103,3 +142,37 @@ def segui_account_suggeriti(page):
             continue
 
     print(f"Operazione completata. Account seguiti oggi: {seguiti}")
+
+
+def main():
+    print("DEBUG: main() avviato")
+    print("DEBUG: COOKIES_JSON presente:", bool(COOKIES_JSON))
+    if not COOKIES_JSON:
+        print("Errore: INSTAGRAM_COOKIES non trovato. Aggiungi il secret su GitHub.")
+        return
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            )
+            ok = carica_cookies(context)
+            if not ok:
+                browser.close()
+                return
+            page = context.new_page()
+            segui_account_suggeriti(page)
+            browser.close()
+    except PWTimeoutError:
+        print("Timeout durante la navigazione.")
+    except Exception as e:
+        print(f"Errore imprevisto: {e}")
+
+
+if __name__ == "__main__":
+    print("DEBUG: __main__ eseguito")
+    main()
