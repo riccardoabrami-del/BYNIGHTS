@@ -1,3 +1,10 @@
+print("BYNIGHTS main.py caricato")
+...
+def main():
+    print("BYNIGHTS main() avviato")
+    ...
+
+
 def segui_account_suggeriti(page):
     """Naviga sulla pagina dei suggeriti e segue gli account con abbastanza follower in comune."""
     print("Navigo sulla pagina degli account suggeriti...")
