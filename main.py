@@ -9,6 +9,7 @@ load_dotenv()
 SUGGERITI_URL = "https://www.instagram.com/explore/people/"
 COOKIES_JSON = os.getenv("INSTAGRAM_COOKIES")  # Cookie di sessione in formato JSON
 MAX_FOLLOW = 70  # Numero massimo di account da seguire per sessione
+SOGLIA_MUTUAL = 7  # minimo "altri X" per seguire
 
 
 def carica_cookies(context):
@@ -29,10 +30,8 @@ def carica_cookies(context):
 def chiudi_popup(page):
     """Chiude eventuali popup o dialoghi aperti su Instagram."""
     try:
-        # Tenta di chiudere popup con tasto Escape
         page.keyboard.press("Escape")
         time.sleep(0.5)
-        # Cerca bottone 'Non ora' o 'Chiudi' nei popup
         for testo in ["Non ora", "Not Now", "Chiudi", "Close", "Cancel"]:
             btn = page.locator(f"button:has-text('{testo}')").first
             if btn.is_visible():
@@ -44,7 +43,7 @@ def chiudi_popup(page):
 
 
 def segui_account_suggeriti(page):
-    """Naviga sulla pagina dei suggeriti e segue gli account."""
+    """Naviga sulla pagina dei suggeriti e segue gli account con abbastanza follower in comune."""
     print("Navigo sulla pagina degli account suggeriti...")
     page.goto(SUGGERITI_URL, timeout=60000)
     page.wait_for_timeout(5000)
@@ -54,23 +53,21 @@ def segui_account_suggeriti(page):
         print("Errore: non loggato. I cookie potrebbero essere scaduti.")
         return
 
-    print("Login confermato tramite cookie. Inizio follow...")
+    print("Login confermato tramite cookie. Inizio follow con soglia mutual =", SOGLIA_MUTUAL)
     seguiti = 0
     tentativi_falliti = 0
     max_tentativi_falliti = 10  # Dopo 10 errori consecutivi ricarica la pagina
 
     while seguiti < MAX_FOLLOW:
         try:
-            # Chiudi eventuali popup prima di cercare i bottoni
             chiudi_popup(page)
 
-            # Cerca bottoni 'Segui' (italiano) o 'Follow' (inglese)
-            bottoni = page.locator("button", has_text="Segui").all()
-            if not bottoni:
-                bottoni = page.locator("button", has_text="Follow").all()
+            # prendi le "card" utente che hanno un bottone Segui
+            cards = page.locator("div:has(button:has(div:has-text('Segui')))").all()
+            print("Card trovate:", len(cards))
 
-            if not bottoni:
-                print("Nessun bottone Segui trovato. Ricarico la pagina...")
+            if not cards:
+                print("Nessuna card trovata. Ricarico la pagina...")
                 page.goto(SUGGERITI_URL, timeout=60000)
                 page.wait_for_timeout(4000)
                 tentativi_falliti += 1
@@ -79,39 +76,57 @@ def segui_account_suggeriti(page):
                     break
                 continue
 
-            # Prova a cliccare il primo bottone disponibile
             cliccato = False
-            for bottone in bottoni:
+
+            for card in cards:
                 try:
-                    # Chiudi popup prima di ogni click
+                    # trova lo span tipo "Follower: _nome_ + altri X"
+                    span = card.locator("span:has-text('Follower:')").first
+                    if not span.is_visible():
+                        continue
+
+                    testo = span.inner_text()
+                    # es: "Follower: _matteomacchi___ + altri 8"
+                    if "altri" not in testo:
+                        continue
+
+                    num_str = testo.split("altri")[-1].strip()
+                    num = int("".join(ch for ch in num_str if ch.isdigit()))
+                    print("Follower in comune trovati:", num)
+
+                    if num < SOGLIA_MUTUAL:
+                        continue  # troppo pochi, salta
+
+                    bottone = card.locator("button:has(div:has-text('Segui'))").first
+                    if not bottone.is_visible():
+                        continue
+
                     chiudi_popup(page)
                     bottone.scroll_into_view_if_needed()
                     bottone.click(timeout=3000, force=True)
+                    page.wait_for_timeout(1000)
+
                     seguiti += 1
                     tentativi_falliti = 0
-                    print(f"Seguito account {seguiti}/{MAX_FOLLOW}")
+                    print(f"Seguito account {seguiti}/{MAX_FOLLOW} (mutual {num})")
                     cliccato = True
 
-                    # Dopo ogni follow, cerca subito nuovi account suggeriti
-                    # nella pagina (possono apparire altri suggeriti)
                     time.sleep(2)
 
-                    # Ogni 5 follow ricarica per avere nuovi suggerimenti
                     if seguiti % 5 == 0:
                         page.reload()
                         page.wait_for_timeout(4000)
 
-                    break  # Passa al prossimo ciclo del while
+                    break  # torna al while per aggiornare la lista
 
                 except Exception as e:
-                    print(f"Errore click bottone: {e}")
+                    print(f"Errore su card: {e}")
                     chiudi_popup(page)
-                    continue  # Prova il prossimo bottone nella lista
+                    continue
 
             if not cliccato:
                 tentativi_falliti += 1
-                print(f"Nessun bottone cliccabile trovato (tentativo {tentativi_falliti})")
-                # Scrolla per caricare nuovi account
+                print(f"Nessun account con >= {SOGLIA_MUTUAL} mutual cliccabile (tentativo {tentativi_falliti})")
                 page.keyboard.press("End")
                 time.sleep(2)
                 if tentativi_falliti >= max_tentativi_falliti:
@@ -134,11 +149,15 @@ def main():
         return
     try:
         with sync_playwright() as p:
+            # per debug puoi mettere headless=False e slow_mo=500
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
             )
-            # Carica i cookie di sessione
             ok = carica_cookies(context)
             if not ok:
                 browser.close()
