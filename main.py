@@ -10,8 +10,7 @@ load_dotenv()
 SUGGERITI_URL = "https://www.instagram.com/explore/people/"
 COOKIES_JSON = os.getenv("INSTAGRAM_COOKIES")  # Cookie di sessione in formato JSON
 MAX_FOLLOW = 70  # Numero massimo di account da seguire per sessione
-MIN_COMUNI = 7   # Minimo follower in comune richiesti
-
+MIN_COMUNI = 7   # minimo "altri" + 1
 
 def carica_cookies(context):
     """Carica i cookie di sessione Instagram nel browser."""
@@ -46,13 +45,12 @@ def chiudi_popup(page):
 def segui_account_suggeriti(page):
     """
     Naviga sulla pagina dei suggeriti e segue SOLO gli account
-    che hanno almeno MIN_COMUNI follower in comune.
+    che hanno "+ altri N" con N >= 7 (quindi almeno 7 follower in comune).
     """
     print("Navigo sulla pagina degli account suggeriti...")
     page.goto(SUGGERITI_URL, timeout=60000)
     page.wait_for_timeout(5000)
 
-    # Verifica che il login sia andato a buon fine
     if "accounts/login" in page.url:
         print("Errore: non loggato. I cookie potrebbero essere scaduti.")
         return
@@ -60,22 +58,22 @@ def segui_account_suggeriti(page):
     print("Login confermato tramite cookie. Inizio follow filtrato...")
     seguiti = 0
     tentativi_falliti = 0
-    max_tentativi_falliti = 10  # Dopo 10 errori consecutivi ricarica/uscita
+    max_tentativi_falliti = 10
 
-    while seguiti < MAX_FOLLOW:
+    inizio = time.time()
+    max_secondi = 600  # 10 minuti di sicurezza
+
+    while seguiti < MAX_FOLLOW and (time.time() - inizio) < max_secondi:
         try:
             chiudi_popup(page)
 
-            # Ogni "row" contiene lo span "Follower:" e il bottone "Segui"
-            rows = page.locator("div").filter(
-                has=page.locator("span:has-text('Follower:')"),
-                has_text="Segui"
-            )
-            count = rows.count()
-            print(f"Righe suggerite trovate: {count}")
+            # tutti gli span che contengono il testo "Follower:"
+            spans = page.locator("span:has-text('Follower:')")
+            count = spans.count()
+            print(f"Span 'Follower:' trovati: {count}")
 
             if count == 0:
-                print("Nessuna riga trovata. Scrollo/ricarico...")
+                print("Nessuno span trovato. Scrollo/ricarico...")
                 page.keyboard.press("End")
                 time.sleep(2)
                 tentativi_falliti += 1
@@ -91,39 +89,40 @@ def segui_account_suggeriti(page):
                 if seguiti >= MAX_FOLLOW:
                     break
 
-                row = rows.nth(i)
-
-                # 1) testo "Follower: vallesopamm + altri X"
-                info_loc = row.locator("span:has-text('Follower:')")
-                if info_loc.count() == 0:
-                    continue
-
-                info_text = info_loc.first.inner_text().strip()
+                span = spans.nth(i)
+                info_text = span.inner_text().strip()
                 print("DEBUG info_text:", repr(info_text))
 
-                comuni = 0
-                m = re.search(r"altri\s+(\d+)", info_text)
-                if m:
-                    comuni = int(m.group(1)) + 1  # 1 è il primo nome mostrato
-                else:
-                    if info_text:
-                        comuni = 1
+                # es. "Follower: clelia_12.___ + altri 4"
+                m = re.search(r"\+ altri\s+(\d+)", info_text)
+                if not m:
+                    print("Skip: nessun '+ altri N' nel testo")
+                    continue
+
+                altri = int(m.group(1))
+                comuni = altri + 1  # 1 è il primo nome mostrato
 
                 if comuni < MIN_COMUNI:
                     print(f"Skip: solo {comuni} follower in comune")
-                    continue  # passa al prossimo suggerimento
+                    continue
 
-                # 2) bottone Segui dentro la stessa card
-                bottone = row.locator("button:has(div:has-text('Segui'))").first
+                # risalgo al contenitore card (div grande che contiene anche il bottone)
+                card = span.locator("xpath=ancestor::div[contains(@class,'html-div')][1]") \
+                           .locator("xpath=ancestor::div[contains(@class,'html-div')][1]")
+
+                bottone = card.locator(
+                    "button:has(div:has-text('Segui'))"
+                ).first
+
                 if bottone.count() == 0 or not bottone.is_visible():
-                    print("DEBUG: bottone Segui non trovato/visibile in questa row")
+                    print("DEBUG: bottone Segui non trovato/visibile per questo span")
                     continue
 
                 try:
                     chiudi_popup(page)
                     bottone.scroll_into_view_if_needed()
                     bottone.click(timeout=3000, force=True)
-                    page.wait_for_timeout(1000)  # tempo al cambio stato
+                    page.wait_for_timeout(1000)
 
                     seguiti += 1
                     tentativi_falliti = 0
@@ -175,7 +174,7 @@ def main():
         return
     try:
         with sync_playwright() as p:
-            # per debug puoi mettere headless=False e slow_mo=500
+            # per debug locale: headless=False, slow_mo=500
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
                 user_agent=(
