@@ -17,7 +17,6 @@ def segui_account_con_follower_comuni(page):
 
             # prendi tutte le card utente (il contenitore grande)
             cards = page.locator("div[role='button'] div[style*='display: flex']").all()
-            # se questo selettore non va bene lo aggiustiamo dopo
 
             if not cards:
                 print("Nessuna card trovata, ricarico pagina...")
@@ -37,9 +36,10 @@ def segui_account_con_follower_comuni(page):
 
                     # testo con i follower in comune (es. "Follower: xxx + altri 4")
                     follower_text = card.locator("span:has-text('Follower')").first.inner_text(timeout=3000)
+                    print("DEBUG follower_text:", follower_text)
 
                     # cerco l'ultimo numero nel testo (es. 4 in "+ altri 4")
-                    numeri = re.findall(r"(\\d+)", follower_text)
+                    numeri = re.findall(r"\d+", follower_text)
                     if not numeri:
                         continue
                     follower_comuni = int(numeri[-1])
@@ -92,4 +92,3 @@ def segui_account_con_follower_comuni(page):
             continue
 
     print(f"Operazione completata. Account seguiti oggi: {seguiti}")
-
