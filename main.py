@@ -5,8 +5,6 @@ import time
 from dotenv import load_dotenv
 import re
 
-print("DEBUG: main.py caricato")
-
 load_dotenv()
 
 SUGGERITI_URL = "https://www.instagram.com/explore/people/"
@@ -17,7 +15,6 @@ MIN_COMUNI = 7   # Minimo follower in comune richiesti
 
 def carica_cookies(context):
     """Carica i cookie di sessione Instagram nel browser."""
-    print("DEBUG: carica_cookies() chiamata")
     if not COOKIES_JSON:
         print("Errore: INSTAGRAM_COOKIES non trovato nei secrets.")
         return False
@@ -48,13 +45,14 @@ def chiudi_popup(page):
 
 def segui_account_suggeriti(page):
     """
-    Naviga sulla pagina dei suggeriti e segue solo gli account
+    Naviga sulla pagina dei suggeriti e segue SOLO gli account
     che hanno almeno MIN_COMUNI follower in comune.
     """
     print("Navigo sulla pagina degli account suggeriti...")
     page.goto(SUGGERITI_URL, timeout=60000)
     page.wait_for_timeout(5000)
 
+    # Verifica che il login sia andato a buon fine
     if "accounts/login" in page.url:
         print("Errore: non loggato. I cookie potrebbero essere scaduti.")
         return
@@ -62,28 +60,29 @@ def segui_account_suggeriti(page):
     print("Login confermato tramite cookie. Inizio follow filtrato...")
     seguiti = 0
     tentativi_falliti = 0
-    max_tentativi_falliti = 10
+    max_tentativi_falliti = 10  # Dopo 10 errori consecutivi ricarica/uscita
 
     while seguiti < MAX_FOLLOW:
         try:
             chiudi_popup(page)
 
-            # Ogni "row" contiene avatar, nome, testo follower in comune e bottone Segui.
-            # Partiamo da un div generico che contenga un bottone Segui/Follow.
+            # Ogni "row" contiene lo span "Follower:" e il bottone "Segui"
             rows = page.locator("div").filter(
-                has=page.locator("button:has-text('Segui'), button:has-text('Follow')")
+                has=page.locator("span:has-text('Follower:')"),
+                has_text="Segui"
             )
             count = rows.count()
             print(f"Righe suggerite trovate: {count}")
 
             if count == 0:
-                print("Nessun suggerimento trovato. Ricarico la pagina...")
-                page.goto(SUGGERITI_URL, timeout=60000)
-                page.wait_for_timeout(4000)
+                print("Nessuna riga trovata. Scrollo/ricarico...")
+                page.keyboard.press("End")
+                time.sleep(2)
                 tentativi_falliti += 1
                 if tentativi_falliti >= max_tentativi_falliti:
-                    print("Troppi tentativi falliti. Uscita.")
-                    break
+                    page.goto(SUGGERITI_URL, timeout=60000)
+                    page.wait_for_timeout(4000)
+                    tentativi_falliti = 0
                 continue
 
             cliccato_almeno_uno = False
@@ -94,45 +93,37 @@ def segui_account_suggeriti(page):
 
                 row = rows.nth(i)
 
-                # Cerca lo span che contiene "Follower" (italiano) o "Mutual followers"/"Followers you follow" ecc.
-                info_loc = row.locator(
-                    "span:has-text('Follower'), span:has-text('followers in common'), "
-                    "span:has-text('Mutual followers')"
-                )
-
+                # 1) testo "Follower: vallesopamm + altri X"
+                info_loc = row.locator("span:has-text('Follower:')")
                 if info_loc.count() == 0:
                     continue
 
                 info_text = info_loc.first.inner_text().strip()
-                # Esempi possibili:
-                # "vallesamm + altri 9"
-                # "vallesamm e altri 9"
-                # "mario.rossi"
-                # "mario.rossi and 3 others" (inglese)
+                print("DEBUG info_text:", repr(info_text))
 
                 comuni = 0
-                # casi "altri 9" / "others 9"
-                m = re.search(r"(altri|others)\s+(\d+)", info_text)
+                m = re.search(r"altri\s+(\d+)", info_text)
                 if m:
-                    comuni = int(m.group(2)) + 1  # uno è il nome mostrato
+                    comuni = int(m.group(1)) + 1  # 1 è il primo nome mostrato
                 else:
-                    # Se non ci sono "altri"/"others" ma almeno un nome, consideriamo 1 in comune
                     if info_text:
                         comuni = 1
 
                 if comuni < MIN_COMUNI:
-                    # Non raggiunge la soglia minima, passa al prossimo suggerimento
-                    continue
+                    print(f"Skip: solo {comuni} follower in comune")
+                    continue  # passa al prossimo suggerimento
 
-                bottone = row.locator("button:has-text('Segui'), button:has-text('Follow')").first
-                if not bottone.is_visible():
+                # 2) bottone Segui dentro la stessa card
+                bottone = row.locator("button:has(div:has-text('Segui'))").first
+                if bottone.count() == 0 or not bottone.is_visible():
+                    print("DEBUG: bottone Segui non trovato/visibile in questa row")
                     continue
 
                 try:
                     chiudi_popup(page)
                     bottone.scroll_into_view_if_needed()
                     bottone.click(timeout=3000, force=True)
-                    page.wait_for_timeout(1000)
+                    page.wait_for_timeout(1000)  # tempo al cambio stato
 
                     seguiti += 1
                     tentativi_falliti = 0
@@ -156,8 +147,8 @@ def segui_account_suggeriti(page):
             if not cliccato_almeno_uno:
                 tentativi_falliti += 1
                 print(
-                    f"Nessun bottone cliccabile trovato con >= {MIN_COMUNI} "
-                    f"follower in comune (tentativo {tentativi_falliti})"
+                    f"Nessun bottone cliccabile con >= {MIN_COMUNI} follower in comune "
+                    f"(tentativo {tentativi_falliti})"
                 )
                 page.keyboard.press("End")
                 time.sleep(2)
@@ -179,13 +170,12 @@ def segui_account_suggeriti(page):
 
 
 def main():
-    print("DEBUG: main() avviato")
-    print("DEBUG: COOKIES_JSON presente:", bool(COOKIES_JSON))
     if not COOKIES_JSON:
         print("Errore: INSTAGRAM_COOKIES non trovato. Aggiungi il secret su GitHub.")
         return
     try:
         with sync_playwright() as p:
+            # per debug puoi mettere headless=False e slow_mo=500
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
                 user_agent=(
@@ -208,5 +198,4 @@ def main():
 
 
 if __name__ == "__main__":
-    print("DEBUG: __main__ eseguito")
     main()
