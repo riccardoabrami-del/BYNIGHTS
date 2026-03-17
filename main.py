@@ -3,6 +3,7 @@ import os
 import json
 import time
 from dotenv import load_dotenv
+import re
 
 print("DEBUG: main.py caricato")
 
@@ -11,6 +12,7 @@ load_dotenv()
 SUGGERITI_URL = "https://www.instagram.com/explore/people/"
 COOKIES_JSON = os.getenv("INSTAGRAM_COOKIES")  # Cookie di sessione in formato JSON
 MAX_FOLLOW = 70  # Numero massimo di account da seguire per sessione
+MIN_COMUNI = 7   # Minimo follower in comune richiesti
 
 
 def carica_cookies(context):
@@ -44,32 +46,11 @@ def chiudi_popup(page):
         pass
 
 
-def trova_bottoni_segui(page):
-    """Restituisce una lista di locator per i bottoni 'Segui' / 'Follow'."""
-    locator_seg = page.locator("button:has(div:has-text('Segui'))")
-    locator_follow = page.locator("button:has(div:has-text('Follow'))")
-
-    count_seg = locator_seg.count()
-    count_follow = locator_follow.count()
-    print(f"Bottoni Segui: {count_seg}, Bottoni Follow: {count_follow}")
-
-    if count_seg > 0:
-        return locator_seg.all()
-    if count_follow > 0:
-        return locator_follow.all()
-
-    fallback = page.locator("article button, div[role='button']")
-    count_fallback = fallback.count()
-    print(f"Bottoni fallback trovati: {count_fallback}")
-
-    if count_fallback > 0:
-        return fallback.all()
-
-    return []
-
-
 def segui_account_suggeriti(page):
-    """Naviga sulla pagina dei suggeriti e segue gli account."""
+    """
+    Naviga sulla pagina dei suggeriti e segue solo gli account
+    che hanno almeno MIN_COMUNI follower in comune.
+    """
     print("Navigo sulla pagina degli account suggeriti...")
     page.goto(SUGGERITI_URL, timeout=60000)
     page.wait_for_timeout(5000)
@@ -78,7 +59,7 @@ def segui_account_suggeriti(page):
         print("Errore: non loggato. I cookie potrebbero essere scaduti.")
         return
 
-    print("Login confermato tramite cookie. Inizio follow...")
+    print("Login confermato tramite cookie. Inizio follow filtrato...")
     seguiti = 0
     tentativi_falliti = 0
     max_tentativi_falliti = 10
@@ -87,10 +68,16 @@ def segui_account_suggeriti(page):
         try:
             chiudi_popup(page)
 
-            bottoni = trova_bottoni_segui(page)
+            # Ogni "row" contiene avatar, nome, testo follower in comune e bottone Segui.
+            # Partiamo da un div generico che contenga un bottone Segui/Follow.
+            rows = page.locator("div").filter(
+                has=page.locator("button:has-text('Segui'), button:has-text('Follow')")
+            )
+            count = rows.count()
+            print(f"Righe suggerite trovate: {count}")
 
-            if not bottoni:
-                print("Nessun bottone Segui trovato. Ricarico la pagina...")
+            if count == 0:
+                print("Nessun suggerimento trovato. Ricarico la pagina...")
                 page.goto(SUGGERITI_URL, timeout=60000)
                 page.wait_for_timeout(4000)
                 tentativi_falliti += 1
@@ -99,8 +86,48 @@ def segui_account_suggeriti(page):
                     break
                 continue
 
-            cliccato = False
-            for bottone in bottoni:
+            cliccato_almeno_uno = False
+
+            for i in range(count):
+                if seguiti >= MAX_FOLLOW:
+                    break
+
+                row = rows.nth(i)
+
+                # Cerca lo span che contiene "Follower" (italiano) o "Mutual followers"/"Followers you follow" ecc.
+                info_loc = row.locator(
+                    "span:has-text('Follower'), span:has-text('followers in common'), "
+                    "span:has-text('Mutual followers')"
+                )
+
+                if info_loc.count() == 0:
+                    continue
+
+                info_text = info_loc.first.inner_text().strip()
+                # Esempi possibili:
+                # "vallesamm + altri 9"
+                # "vallesamm e altri 9"
+                # "mario.rossi"
+                # "mario.rossi and 3 others" (inglese)
+
+                comuni = 0
+                # casi "altri 9" / "others 9"
+                m = re.search(r"(altri|others)\s+(\d+)", info_text)
+                if m:
+                    comuni = int(m.group(2)) + 1  # uno è il nome mostrato
+                else:
+                    # Se non ci sono "altri"/"others" ma almeno un nome, consideriamo 1 in comune
+                    if info_text:
+                        comuni = 1
+
+                if comuni < MIN_COMUNI:
+                    # Non raggiunge la soglia minima, passa al prossimo suggerimento
+                    continue
+
+                bottone = row.locator("button:has-text('Segui'), button:has-text('Follow')").first
+                if not bottone.is_visible():
+                    continue
+
                 try:
                     chiudi_popup(page)
                     bottone.scroll_into_view_if_needed()
@@ -109,8 +136,11 @@ def segui_account_suggeriti(page):
 
                     seguiti += 1
                     tentativi_falliti = 0
-                    print(f"Seguito account {seguiti}/{MAX_FOLLOW}")
-                    cliccato = True
+                    cliccato_almeno_uno = True
+                    print(
+                        f"Seguito account {seguiti}/{MAX_FOLLOW} "
+                        f"(follower in comune: {comuni})"
+                    )
 
                     time.sleep(2)
 
@@ -118,16 +148,17 @@ def segui_account_suggeriti(page):
                         page.reload()
                         page.wait_for_timeout(4000)
 
-                    break
-
                 except Exception as e:
                     print(f"Errore click bottone: {e}")
                     chiudi_popup(page)
                     continue
 
-            if not cliccato:
+            if not cliccato_almeno_uno:
                 tentativi_falliti += 1
-                print(f"Nessun bottone cliccabile trovato (tentativo {tentativi_falliti})")
+                print(
+                    f"Nessun bottone cliccabile trovato con >= {MIN_COMUNI} "
+                    f"follower in comune (tentativo {tentativi_falliti})"
+                )
                 page.keyboard.press("End")
                 time.sleep(2)
                 if tentativi_falliti >= max_tentativi_falliti:
@@ -141,7 +172,10 @@ def segui_account_suggeriti(page):
             time.sleep(2)
             continue
 
-    print(f"Operazione completata. Account seguiti oggi: {seguiti}")
+    print(
+        f"Operazione completata. Account seguiti oggi (>= {MIN_COMUNI} follower in comune): "
+        f"{seguiti}"
+    )
 
 
 def main():
