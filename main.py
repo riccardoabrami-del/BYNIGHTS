@@ -107,8 +107,11 @@ def segui_account_suggeriti(page):
                     continue
 
                 # risalgo al contenitore card (div grande che contiene anche il bottone)
-                card = span.locator("xpath=ancestor::div[contains(@class,'html-div')][1]") \
-                           .locator("xpath=ancestor::div[contains(@class,'html-div')][1]")
+                card = span.locator(
+                    "xpath=ancestor::div[contains(@class,'html-div')][1]"
+                ).locator(
+                    "xpath=ancestor::div[contains(@class,'html-div')][1]"
+                )
 
                 bottone = card.locator(
                     "button:has(div:has-text('Segui'))"
