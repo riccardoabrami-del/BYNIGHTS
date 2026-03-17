@@ -4,6 +4,20 @@ import time
 
 SOGLIA_FOLLOWER_COMUNI = 7
 
+def chiudi_popup(page):
+    """
+    Chiude popup su Instagram (funzione stub per evitare errori)
+    """
+    try:
+        # Prova a cliccare il bottone di chiusura se presente
+        close_buttons = page.locator("button[aria-label='Chiudi']").all()
+        for button in close_buttons:
+            if button.is_visible():
+                button.click(timeout=1000, force=True)
+                break
+    except:
+        pass  # Ignora errori se non ci sono popup
+
 def segui_account_con_follower_comuni(page):
     """
     Scorre le card dei suggeriti e segue solo gli account
