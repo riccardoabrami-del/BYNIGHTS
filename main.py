@@ -1,4 +1,6 @@
 import re
+import json
+import time
 
 SOGLIA_FOLLOWER_COMUNI = 7
 
@@ -92,3 +94,44 @@ def segui_account_con_follower_comuni(page):
             continue
 
     print(f"Operazione completata. Account seguiti oggi: {seguiti}")
+
+# ===== INIZIO SCRIPT =====
+import os
+from playwright.sync_api import sync_playwright
+
+INSTAGRAM_COOKIES = os.getenv('INSTAGRAM_COOKIES')
+MAX_FOLLOW = 50
+SUGGERITI_URL = 'https://www.instagram.com/explore/people/'
+
+if not INSTAGRAM_COOKIES:
+    print("Errore: INSTAGRAM_COOKIES non configurato")
+    exit(1)
+
+print("=== Inizio BYNIGHTS ===")
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=False)
+    context = browser.new_context()
+    page = context.new_page()
+    
+    print("Navigazione a Instagram...")
+    page.goto('https://www.instagram.com/accounts/login/', timeout=60000)
+    page.wait_for_timeout(3000)
+    
+    # Carica i cookies salvati
+    print("Caricamento cookies...")
+    cookies = json.loads(INSTAGRAM_COOKIES)
+    context.add_cookies(cookies)
+    page.reload()
+    page.wait_for_timeout(3000)
+    
+    # Naviga ai suggeriti e chiama la funzione
+    page.goto(SUGGERITI_URL, timeout=60000)
+    page.wait_for_timeout(3000)
+    
+    print("Avvio follow account...")
+    segui_account_con_follower_comuni(page)
+    
+    browser.close()
+    print("=== Fine BYNIGHTS ===")
+
